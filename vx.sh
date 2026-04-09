@@ -90,7 +90,7 @@ function show_dashboard() {
     # === 👆 新增结束 👆 ===
 
  WARP_STAT="${red}未开启 ❌${plain}"
-if [[ -f "$JSON_FILE" ]] && jq -e '.outbounds[] | select(.tag == "warp-socks")' "$JSON_FILE" >/dev/null 2>&1; then
+if [[ -f "$JSON_FILE" ]] && jq -e '.outbounds[] | select(.tag == "warpipv6" or .tag == "warpipv4" or .tag == "warp-socks")' "$JSON_FILE" >/dev/null 2>&1; then
     # === 🚀 触发物理探针：极速获取 WARP 真实 IP (超时 1.5 秒防卡死) ===
     WARP_CHECK_IP=$(curl -s --max-time 1.5 -x socks5h://127.0.0.1:40000 ipinfo.io/ip 2>/dev/null)
     if [[ -n "$WARP_CHECK_IP" ]]; then
@@ -292,10 +292,10 @@ EOF
 function get_smart_ip() {
     IPV4_TMP=$(curl -s4m3 icanhazip.com || curl -s4m3 api.ipify.org || curl -s4m3 ipinfo.io/ip)
     IPV6_TMP=$(curl -s6m3 icanhazip.com || curl -s6m3 api6.ipify.org)
-    if [[ -n "$IPV4_TMP" ]]; then
-        SERVER_IP="$IPV4_TMP"
-    elif [[ -n "$IPV6_TMP" ]]; then
+    if [[ -n "$IPV6_TMP" ]]; then
         SERVER_IP="[$IPV6_TMP]" # 纯 IPv6 环境自动加括号以符合 URL 规范
+    elif [[ -n "$IPV4_TMP" ]]; then
+        SERVER_IP="$IPV4_TMP"
     else
         SERVER_IP="127.0.0.1"
     fi
@@ -784,12 +784,12 @@ function enable_warp() {
     echo -e "${cyan}======================================================================${plain}"
 
     # 🚀 [新增逻辑] 智能状态感知：检测是否已经开启 WARP
-    if jq -e '.outbounds[] | select(.tag == "warp-socks")' "$JSON_FILE" >/dev/null 2>&1; then
+    if jq -e '.outbounds[] | select(.tag == "warpipv6" or .tag == "warpipv4" or .tag == "warp-socks")' "$JSON_FILE" >/dev/null 2>&1; then
         echo -e "${green}>>> 系统检测：当前 WARP 智能分流已处于【运行中】状态！${plain}"
         read -p "❓ 是否要一键关闭并剥离 WARP 路由规则？(y/n) [默认 n]: " close_choice
         if [[ "$close_choice" == [Yy] ]]; then
             echo -e "${yellow}>>> 正在剥离 Sing-box 神经元路由，恢复系统原生直连...${plain}"
-           jq 'del(.outbounds[] | select(.tag == "warp-socks")) | del(.route.rules[] | select(.outbound == "warp-socks"))' "$JSON_FILE" | atomic_jq
+           jq 'del(.outbounds[] | select(.tag == "warpipv6" or .tag == "warpipv4" or .tag == "warp-socks")) | del(.route.rules[] | select(.outbound == "warpipv6" or .outbound == "warpipv4" or .outbound == "warp-socks"))' "$JSON_FILE" | atomic_jq
             
             if command -v warp-cli &> /dev/null; then
                 warp-cli --accept-tos disconnect >/dev/null 2>&1 || warp-cli disconnect >/dev/null 2>&1
@@ -847,13 +847,13 @@ function enable_warp() {
     fi
 
     # 清理历史规则
-    jq 'del(.outbounds[] | select(.tag == "warp-socks")) | del(.route.rules[] | select(.outbound == "warp-socks"))' "$JSON_FILE" | atomic_jq
+    jq 'del(.outbounds[] | select(.tag == "warpipv6" or .tag == "warpipv4" or .tag == "warp-socks")) | del(.route.rules[] | select(.outbound == "warpipv6" or .outbound == "warpipv4" or .outbound == "warp-socks"))' "$JSON_FILE" | atomic_jq
 
     # 挂载 SOCKS5 出口
-    jq '.outbounds += [{"type":"socks","tag":"warp-socks","server":"127.0.0.1","server_port":40000,"domain_strategy":"prefer_ipv6"}]' "$JSON_FILE" | atomic_jq
+    jq '.outbounds += [{"type":"socks","tag":"warpipv6","server":"127.0.0.1","server_port":40000,"domain_strategy":"prefer_ipv6"}]' "$JSON_FILE" | atomic_jq
 
     # 【最稳妥：神级关键词分流 + 强制底层流量嗅探】彻底解决多端 DNS 泄露导致的分流失效
-jq '.outbounds = [{"type":"socks","tag":"warp-socks","server":"127.0.0.1","server_port":40000,"domain_strategy":"prefer_ipv6"}, {"type":"direct","tag":"direct"}, {"type":"block","tag":"block"}] | .route.rules = [{"action":"sniff"}] + [{"domain_keyword":["google","youtube","gmail","openai","chatgpt","netflix","spotify","instagram","dazn","disney","prime","hulu","tiktok","reddit","discord","pixiv","bing","wiki"],"domain_suffix":["openai.com","chatgpt.com","ai.com","anthropic.com","claude.ai","google.com","googleapis.com","gstatic.com","netflix.com","disneyplus.com","amazon.com","primevideo.com","tiktok.com","instagram.com","reddit.com","discord.com","wikipedia.org"],"outbound":"warp-socks"}]' "$JSON_FILE" | atomic_jq
+jq '.outbounds = [{"type":"socks","tag":"warpipv6","server":"127.0.0.1","server_port":40000,"domain_strategy":"prefer_ipv6"}, {"type":"direct","tag":"direct"}, {"type":"block","tag":"block"}] | .route.rules = [{"action":"sniff"}] + [{"domain_keyword":["google","youtube","gmail","openai","chatgpt","netflix","spotify","instagram","dazn","disney","prime","hulu","tiktok","reddit","discord","pixiv","bing","wiki"],"domain_suffix":["openai.com","chatgpt.com","ai.com","anthropic.com","claude.ai","google.com","googleapis.com","gstatic.com","netflix.com","disneyplus.com","amazon.com","primevideo.com","tiktok.com","instagram.com","reddit.com","discord.com","wikipedia.org"],"outbound":"warpipv6"}]' "$JSON_FILE" | atomic_jq
     # 4. 重启生效
     echo -e "${yellow}>>> [4/4] 正在重启引擎，激活无缝解锁矩阵...${plain}"
     systemctl restart vx-core.service
@@ -1318,7 +1318,7 @@ function test_media_unlock() {
     echo -e "${cyan}======================================================================${plain}"
     
     # 智能判断：检测是否已经挂载了 WARP
-    if jq -e '.outbounds[] | select(.tag == "warp-socks")' "$JSON_FILE" >/dev/null 2>&1; then
+    if jq -e '.outbounds[] | select(.tag == "warpipv6" or .tag == "warpipv4" or .tag == "warp-socks")' "$JSON_FILE" >/dev/null 2>&1; then
         echo -e "${green}>>> 检测到 WARP 护盾已开启！正在通过底层 40000 端口进行深度穿透检测...${plain}"
         echo -e "${yellow}💡 提示: 测速脚本正在拉取中，大约需要 1-2 分钟，请耐心等待。${plain}\n"
         ALL_PROXY=socks5h://127.0.0.1:40000 bash <(curl -x socks5h://127.0.0.1:40000 -sL https://github.com/lmc999/RegionRestrictionCheck/raw/main/check.sh)
