@@ -92,7 +92,9 @@ function show_dashboard() {
  WARP_STAT="${red}未开启 ❌${plain}"
 if [[ -f "$JSON_FILE" ]] && jq -e '.outbounds[] | select(.tag == "warp-socks")' "$JSON_FILE" >/dev/null 2>&1; then
     # === 🚀 触发物理探针：极速获取 WARP 真实 IP (超时 1.5 秒防卡死) ===
-    WARP_CHECK_IP=$(curl -s --max-time 1.5 -x socks5h://127.0.0.1:40000 ipinfo.io/ip 2>/dev/null)
+    WARP_SERVER=$(jq -r '.outbounds[] | select(.tag == "warp-socks") | .server' "$JSON_FILE" 2>/dev/null || echo "127.0.0.1")
+    WARP_PORT=$(jq -r '.outbounds[] | select(.tag == "warp-socks") | .server_port' "$JSON_FILE" 2>/dev/null || echo "40000")
+    WARP_CHECK_IP=$(curl -s --max-time 1.5 -x socks5h://$WARP_SERVER:$WARP_PORT ipinfo.io/ip 2>/dev/null)
     if [[ -n "$WARP_CHECK_IP" ]]; then
         WARP_STAT="${green}已激活 ✅${plain} (SOCKS5 分流解锁) ${cyan}➡️ [IP: ${WARP_CHECK_IP}]${plain}"
     else
@@ -783,6 +785,23 @@ function enable_warp() {
     echo -e "         🛡️ WARP 智能优选解锁引擎 (流媒体/AI 专线) 控制中心"
     echo -e "${cyan}======================================================================${plain}"
 
+    # 🚀 新增：选择 WARP 出站优先级
+    echo -e "请选择 WARP 出站优先级："
+    echo -e "  ${cyan}1.${plain} 优先 IPv4 出站"
+    echo -e "  ${cyan}2.${plain} 优先 IPv6 出站"
+    read -p "👉 请选择 [1/2] (直接回车默认选 1): " WARP_PREF
+    WARP_PREF=${WARP_PREF:-1}
+
+    if [[ "$WARP_PREF" == "2" ]]; then
+        WARP_SERVER="::1"
+        WARP_PORT=40001
+        WARP_CLI_EXTRA="--enable-ipv6"
+    else
+        WARP_SERVER="127.0.0.1"
+        WARP_PORT=40000
+        WARP_CLI_EXTRA=""
+    fi
+
     # 🚀 [新增逻辑] 智能状态感知：检测是否已经开启 WARP
     if jq -e '.outbounds[] | select(.tag == "warp-socks")' "$JSON_FILE" >/dev/null 2>&1; then
         echo -e "${green}>>> 系统检测：当前 WARP 智能分流已处于【运行中】状态！${plain}"
@@ -821,17 +840,17 @@ function enable_warp() {
     # 2. 隔离化配置 (绝对防失联)
     echo -e "${yellow}>>> [2/4] 正在建立本地 SOCKS5 安全隔离隧道...${plain}"
     warp-cli --accept-tos registration new >/dev/null 2>&1 || warp-cli registration new >/dev/null 2>&1
-    warp-cli --accept-tos mode proxy >/dev/null 2>&1 || warp-cli mode proxy >/dev/null 2>&1
-    warp-cli --accept-tos proxy port 40000 >/dev/null 2>&1 || warp-cli proxy port 40000 >/dev/null 2>&1
+    warp-cli --accept-tos mode proxy $WARP_CLI_EXTRA >/dev/null 2>&1 || warp-cli mode proxy $WARP_CLI_EXTRA >/dev/null 2>&1
+    warp-cli --accept-tos proxy port $WARP_PORT >/dev/null 2>&1 || warp-cli proxy port $WARP_PORT >/dev/null 2>&1
     warp-cli --accept-tos connect >/dev/null 2>&1 || warp-cli connect >/dev/null 2>&1
     
     echo -e ">>> 正在等待隧道连通，请稍候 5 秒..."
     sleep 5
 
     # 🚀 [新增逻辑] 物理探针极速抓取 IP
-    WARP_IP=$(curl -s --max-time 3 -x socks5h://127.0.0.1:40000 ipinfo.io/ip 2>/dev/null)
+    WARP_IP=$(curl -s --max-time 3 -x socks5h://$WARP_SERVER:$WARP_PORT ipinfo.io/ip 2>/dev/null)
     if [[ -n "$WARP_IP" ]]; then
-        echo -e "${green}✅ WARP 隔离通道建立成功！(监听端口: 40000 | 成功套取防封 IP: ${cyan}${WARP_IP}${green})${plain}"
+        echo -e "${green}✅ WARP 隔离通道建立成功！(监听端口: $WARP_PORT | 成功套取防封 IP: ${cyan}${WARP_IP}${green})${plain}"
     else
         echo -e "${red}❌ WARP 通道建立失败或响应超时！这可能是由于当前 VPS 架构受限。${plain}"
         echo -e "${yellow}提示: 核心代理服务未受影响，按回车返回大屏...${plain}"
@@ -850,10 +869,10 @@ function enable_warp() {
     jq 'del(.outbounds[] | select(.tag == "warp-socks")) | del(.route.rules[] | select(.outbound == "warp-socks"))' "$JSON_FILE" | atomic_jq
 
     # 挂载 SOCKS5 出口
-    jq '.outbounds += [{"type":"socks","tag":"warp-socks","server":"127.0.0.1","server_port":40000}]' "$JSON_FILE" | atomic_jq
+    jq '.outbounds += [{"type":"socks","tag":"warp-socks","server":"'"$WARP_SERVER"'","server_port":'"$WARP_PORT"'}]' "$JSON_FILE" | atomic_jq
 
     # 【最稳妥：神级关键词分流 + 强制底层流量嗅探】彻底解决多端 DNS 泄露导致的分流失效
-jq '.outbounds = [{"type":"socks","tag":"warp-socks","server":"127.0.0.1","server_port":40000}, {"type":"direct","tag":"direct"}, {"type":"block","tag":"block"}] | .route.rules = [{"action":"sniff"}] + [{"domain_keyword":["google","youtube","gmail","openai","chatgpt","netflix","spotify","instagram","dazn","disney","prime","hulu","tiktok","reddit","discord","pixiv","bing","wiki"],"domain_suffix":["openai.com","chatgpt.com","ai.com","anthropic.com","claude.ai","google.com","googleapis.com","gstatic.com","netflix.com","disneyplus.com","amazon.com","primevideo.com","tiktok.com","instagram.com","reddit.com","discord.com","wikipedia.org"],"outbound":"warp-socks"}]' "$JSON_FILE" | atomic_jq
+jq '.outbounds = [{"type":"socks","tag":"warp-socks","server":"'"$WARP_SERVER"'","server_port":'"$WARP_PORT"'}, {"type":"direct","tag":"direct"}, {"type":"block","tag":"block"}] | .route.rules = [{"action":"sniff"}] + [{"domain_keyword":["google","youtube","gmail","openai","chatgpt","netflix","spotify","instagram","dazn","disney","prime","hulu","tiktok","reddit","discord","pixiv","bing","wiki"],"domain_suffix":["openai.com","chatgpt.com","ai.com","anthropic.com","claude.ai","google.com","googleapis.com","gstatic.com","netflix.com","disneyplus.com","amazon.com","primevideo.com","tiktok.com","instagram.com","reddit.com","discord.com","wikipedia.org"],"outbound":"warp-socks"}]' "$JSON_FILE" | atomic_jq
     # 4. 重启生效
     echo -e "${yellow}>>> [4/4] 正在重启引擎，激活无缝解锁矩阵...${plain}"
     systemctl restart vx-core.service
