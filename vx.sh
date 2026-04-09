@@ -794,13 +794,11 @@ function enable_warp() {
 
     if [[ "$WARP_PREF" == "2" ]]; then
         WARP_SERVER="::1"
-        WARP_PORT=40001
-        WARP_CLI_EXTRA="--enable-ipv6"
     else
         WARP_SERVER="127.0.0.1"
-        WARP_PORT=40000
-        WARP_CLI_EXTRA=""
     fi
+    WARP_PORT=40000
+    WARP_CLI_EXTRA=""
 
     # 🚀 [新增逻辑] 智能状态感知：检测是否已经开启 WARP
     if jq -e '.outbounds[] | select(.tag == "warp-socks")' "$JSON_FILE" >/dev/null 2>&1; then
